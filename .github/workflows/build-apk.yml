@@ -25,22 +25,84 @@ jobs:
       - name: Configurar Android
         uses: android-actions/setup-android@v3
 
-      - name: Instalar Android SDK
+      - name: Instalar SDK do Android
         run: |
           yes | sdkmanager --licenses || true
           sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
 
+      - name: Localizar arquivo ZIP
+        run: |
+          echo "Arquivos ZIP encontrados no repositório:"
+          find . -maxdepth 2 -type f -iname "*.zip" -print
+
+          ZIP_FILE=$(find . -maxdepth 2 -type f -iname "*.zip" | head -n 1)
+
+          if [ -z "$ZIP_FILE" ]; then
+            echo "ERRO: nenhum arquivo ZIP foi encontrado."
+            exit 1
+          fi
+
+          echo "ZIP escolhido: $ZIP_FILE"
+          echo "ZIP_FILE=$ZIP_FILE" >> "$GITHUB_ENV"
+
       - name: Extrair projeto USIMEC
         run: |
-          mkdir projeto
-          unzip -q USIMEC_Orcamentos_FINAL.zip -d projeto
+          rm -rf projeto
+          mkdir -p projeto
+
+          echo "Extraindo: $ZIP_FILE"
+          unzip -q "$ZIP_FILE" -d projeto
+
+          echo "Arquivos principais encontrados:"
+          find projeto -maxdepth 4 -type f | head -150
+
+      - name: Localizar projeto Android
+        run: |
+          SETTINGS_FILE=$(find projeto -type f -name "settings.gradle.kts" | head -n 1)
+
+          if [ -z "$SETTINGS_FILE" ]; then
+            SETTINGS_FILE=$(find projeto -type f -name "settings.gradle" | head -n 1)
+          fi
+
+          if [ -z "$SETTINGS_FILE" ]; then
+            echo "ERRO: settings.gradle.kts/settings.gradle não encontrado."
+            echo "Arquivos disponíveis:"
+            find projeto -maxdepth 6 -type f | head -250
+            exit 1
+          fi
+
+          PROJECT_DIR=$(dirname "$SETTINGS_FILE")
+
+          echo "Arquivo encontrado: $SETTINGS_FILE"
+          echo "Projeto Android: $PROJECT_DIR"
+
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
+      - name: Verificar projeto
+        run: |
+          echo "Conteúdo do projeto:"
+          ls -lah "$PROJECT_DIR"
+
+          echo "Arquivo Gradle principal:"
+          find "$PROJECT_DIR" -maxdepth 2 -type f \( -name "build.gradle" -o -name "build.gradle.kts" \) -print
+
+          echo "Módulo app:"
+          find "$PROJECT_DIR/app" -maxdepth 2 -type f 2>/dev/null | head -100 || true
 
       - name: Gerar APK
-        working-directory: projeto
-        run: gradle --no-daemon assembleDebug
+        run: |
+          echo "Compilando o projeto..."
+          gradle --no-daemon -p "$PROJECT_DIR" assembleDebug
+
+      - name: Localizar APK
+        run: |
+          echo "APKs gerados:"
+          find "$PROJECT_DIR" -type f -name "*.apk" -print
 
       - name: Disponibilizar APK
         uses: actions/upload-artifact@v4
         with:
-          name: USIMEC-Orcamentos-APK
-          path: projeto/app/build/outputs/apk/debug/app-debug.apk
+          name: APK-USIMEC
+          path: |
+            projeto/**/build/outputs/apk/**/*.apk
+          if-no-files-found: error
